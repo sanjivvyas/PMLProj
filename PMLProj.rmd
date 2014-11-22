@@ -1,0 +1,115 @@
+---
+title: "Practical Machine Learning - Build, Train, Test model assignment"
+author: "sv"
+date: "Sunday, November 16, 2014"
+output:
+  html_document:
+    fig_height: 6
+    fig_width: 8
+    keep_md: yes
+    toc: yes
+---
+opts_chunk$set(echo=TRUE, results='asis')
+# Desc:
+# The purpose of this project is to demonstrate ability to clean data, pre-process data, build a predictive model, cross
+# validate the model and ultimately test the model with provided test data set.
+#
+# Background: Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of 
+# data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - 
+# a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their 
+# behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity 
+# they do, but they rarely quantify how well they do it. 
+#
+# The goal of the project is to predict the manner in which participants did the exercise.
+#
+# More information is available from the website here: 
+# http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+#
+# The training data for this project are available here: 
+# https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+# The test data are available here: 
+# https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+# Get libraries needed for the analysis/model building and testing. Fix the seed value in random function to maintain reproducibility
+
+```{r}
+library(caret) 
+library(corrplot)
+library(kernlab) 
+library(randomForest) 
+set.seed(1116)
+```
+# Let's get the data. Let's remove null columns and unnecessary columns for the model e.g. names and dates etc.
+# Essentially let's create tidy sets - one for the training set and another for the test set
+# read the csv file for training  
+```{r}
+data_training <- read.csv("pml-training.csv", skip = 0, comment.char = "", check.names = TRUE, ,na.strings= c("NA","NaN",""," "))
+dim(data_training)
+```
+# create the tidy training data set 
+```{r}
+isNA <- apply(data_training, 2, function(x) { sum(is.na(x)) })
+tidyData <- subset(data_training[, which(isNA == 0)],select=-c(X, user_name, new_window, num_window, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp))
+dim(tidyData)
+```
+# read the csv file for testing
+```{r}
+data_test <- read.csv("pml-testing.csv", skip = 0, comment.char = "", check.names = TRUE, ,na.strings= c("NA","NaN",""," "))
+```
+# create the tidy testing data set  
+```{r}
+isNA_testing <- apply(data_test, 2, function(x) { sum(is.na(x)) })
+tidyDatatest <- subset(data_test[, which(isNA_testing == 0)],select=-c(X, user_name, new_window, num_window, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp))
+dim(tidyDatatest)
+```
+# Instead of using the entire training data set for training only, lets split the set into 70% training and 30% cross validation
+```{r}
+ inTrain <- createDataPartition(y = tidyData$classe, p = 0.7, list = F) 
+ training <- tidyData[inTrain, ] 
+ crossval <- tidyData[-inTrain, ] 
+```
+# plot a correlation matrix 
+```{r}
+corrplot(cor(training[, -length(training)]), order = "FPC", method = "color", type = "full", tl.cex = 0.7,  tl.col = rgb(1, 0, 1)) 
+```
+# Now using RandomForest Model for classification and regression, let's train our model. We will use train function for tuning RandomForest routine. It is highly time and resource consuming operation. We will apply the model to the cross validation data that we have set aside.
+```{r}
+ctrl <- trainControl(allowParallel=T, method="cv", number=4)
+model <- train(classe ~ ., data=training, model="rf", trControl=ctrl)
+predcrossval <- predict(model, newdata=crossval)
+```
+# Let's review how good our predictions have been.
+```{r}
+confusionMatrix(crossval$classe, predcrossval) 
+AllComp <- confusionMatrix(crossval$classe, predcrossval) 
+plot(AllComp[[2]], main="Confusion Matrix: All Components")
+```
+
+# Our model is 99.2% correct. Out of Sample errors are low as the accuracy of the model is quite high with 0.9927. Let's see which variables are the most critical i.e. Principal Components. We want to see if we can reduce the Out of Sample errors and increase the accuracy as well as efficiency of the model by reducing number of components.
+
+```{r}
+varImp(model)
+```
+# Out of 53 variables only 20 some variables are of any significance.
+# Let's now try to restricts the application of the model to the 10 most important variables (principal components)
+```{r}
+
+tidyerdata <- subset(tidyData, 
+                    select=c(roll_belt, pitch_forearm, yaw_belt, pitch_belt, magnet_dumbbell_z, magnet_dumbbell_y, roll_forearm, accel_dumbbell_y, magnet_dumbbell_x, roll_dumbbell, classe))
+newmodel <- train(classe ~ ., data=tidyerdata[inTrain,], model="rf", trControl=ctrl)
+
+```
+# Let's review if we are any better off !
+```{r}
+predcrossvalnew <- predict(newmodel, newdata=crossval)
+confusionMatrix(crossval$classe, predcrossvalnew) 
+PrComp <- confusionMatrix(crossval$classe, predcrossvalnew) 
+plot(PrComp[[2]], main="Confusion Matrix: Principal Components")
+```
+# Our newmodel is 98.5% correct as compared to previous one. This model ran faster/efficiently. However estimated out-of-sample error has gone up as compared to when we had all the components and not just the principal. We can observer this as the accuracy has reduced.So we will not use the newer model but will stay with the original model for test data.
+
+# Having the validation set and process of validating and checking helps us to tune the model and reduce out of sample errors. In this case we did not need to tune any further.
+```{r}
+predictTest <- predict(model, tidyDatatest) 
+predictTest
+```
